@@ -1,0 +1,18 @@
+{
+  "debug": false,
+  "http_timeout": 45,
+  "database": {
+    "main": {
+      "endpoint_url": "postgresql://localhost:5432/app"
+    }
+  },
+  "cache": {
+    "type": "redis",
+    "redis": {
+      "master": "mymaster",
+      "sentinels": "redis-ha:26379",
+      "expiry_time": 60
+    }
+  }
+}
+
