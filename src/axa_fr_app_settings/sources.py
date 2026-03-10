@@ -105,6 +105,7 @@ class YamlFileSource:
     path: str | Path
     optional: bool = False
     encoding: str = "utf-8"
+    reload_on_change: bool = False
 
     def load(self) -> Mapping[str, Any]:
         source_path = Path(self.path)
@@ -127,6 +128,7 @@ class JsonFileSource:
     path: str | Path
     optional: bool = False
     encoding: str = "utf-8"
+    reload_on_change: bool = False
 
     def load(self) -> Mapping[str, Any]:
         source_path = Path(self.path)
@@ -171,6 +173,7 @@ class DotEnvFileSource:
     nested_delimiter: str = "__"
     case_sensitive: bool = False
     parse_values: bool = True
+    reload_on_change: bool = False
 
     def load(self) -> Mapping[str, Any]:
         source_path = Path(self.path)
