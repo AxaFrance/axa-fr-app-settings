@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
+from .configuration import ConfigurationRoot
 from .merge import deep_merge
 from .sources import (
     CallableSource,
@@ -138,6 +139,9 @@ class SettingsBuilder(Generic[TSettings]):
     def build(self) -> TSettings:
         data = self.build_data()
         return self._settings_type.model_validate(data)
+
+    def build_configuration(self) -> ConfigurationRoot[TSettings]:
+        return ConfigurationRoot(self.build_data(), self._settings_type)
 
     def build_watched(
         self,

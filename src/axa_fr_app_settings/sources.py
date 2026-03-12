@@ -35,15 +35,76 @@ def _parse_scalar(value: Any) -> Any:
         return value
 
 
+def _ensure_list_size(items: list[Any], index: int) -> None:
+    while len(items) <= index:
+        items.append(None)
+
+
+def _create_container_for_next_key(next_key: str) -> dict[str, Any] | list[Any]:
+    return [] if next_key.isdigit() else {}
+
+
 def _set_nested(mapping: dict[str, Any], keys: list[str], value: Any) -> None:
-    current = mapping
-    for key in keys[:-1]:
-        next_value = current.get(key)
-        if not isinstance(next_value, dict):
-            next_value = {}
-            current[key] = next_value
-        current = next_value
-    current[keys[-1]] = value
+    current: Any = mapping
+    parent: dict[str, Any] | list[Any] | None = None
+    parent_key: str | int | None = None
+
+    for index, key in enumerate(keys):
+        is_last = index == len(keys) - 1
+        next_key = keys[index + 1] if not is_last else None
+
+        if isinstance(current, dict):
+            if is_last:
+                current[key] = value
+                return
+
+            next_value = current.get(key)
+            expected_is_list = bool(next_key and next_key.isdigit())
+            if expected_is_list and not isinstance(next_value, list):
+                next_value = []
+                current[key] = next_value
+            elif not expected_is_list and not isinstance(next_value, dict):
+                next_value = {}
+                current[key] = next_value
+
+            parent = current
+            parent_key = key
+            current = next_value
+            continue
+
+        if isinstance(current, list):
+            if not key.isdigit():
+                raise ValueError(f"List segment expects a numeric index, got '{key}'")
+
+            numeric_key = int(key)
+            _ensure_list_size(current, numeric_key)
+
+            if is_last:
+                current[numeric_key] = value
+                return
+
+            next_value = current[numeric_key]
+            expected_container = _create_container_for_next_key(next_key or "")
+            if not isinstance(next_value, type(expected_container)):
+                next_value = expected_container
+                current[numeric_key] = next_value
+
+            parent = current
+            parent_key = numeric_key
+            current = next_value
+            continue
+
+        replacement = _create_container_for_next_key(key)
+        if (
+            isinstance(parent, dict)
+            and isinstance(parent_key, str)
+            or isinstance(parent, list)
+            and isinstance(parent_key, int)
+        ):
+            parent[parent_key] = replacement
+        current = replacement
+
+    raise ValueError("Nested key path cannot be empty")
 
 
 def _mapping_from_flat_items(
