@@ -4,6 +4,8 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/axa-fr-app-settings)](https://pypi.org/project/axa-fr-app-settings/)
 [![License](https://img.shields.io/pypi/l/axa-fr-app-settings)](https://pypi.org/project/axa-fr-app-settings/)
 [![Typing](https://img.shields.io/pypi/types/axa-fr-app-settings)](https://pypi.org/project/axa-fr-app-settings/)
+[![Downloads](https://img.shields.io/pypi/dm/axa-fr-app-settings)](https://pypi.org/project/axa-fr-app-settings/)
+[![Total downloads](https://static.pepy.tech/badge/axa-fr-app-settings)](https://pepy.tech/project/axa-fr-app-settings)
 
 A Python 3.10+ package designed for `uv` that provides a **typed**, **chainable**, **.NET-like** configuration builder.
 
