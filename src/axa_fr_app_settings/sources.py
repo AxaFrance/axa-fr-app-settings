@@ -16,7 +16,15 @@ class SettingsSource(Protocol):
         ...
 
 
-def _normalize_key(key: str, *, case_sensitive: bool) -> str:
+def _normalize_key(
+    key: str,
+    *,
+    case_sensitive: bool,
+    preserve_keys: bool,
+) -> str:
+    if preserve_keys:
+        return key
+
     normalized = key.replace("-", "_")
     return normalized if case_sensitive else normalized.lower()
 
@@ -107,14 +115,22 @@ def _set_nested(mapping: dict[str, Any], keys: list[str], value: Any) -> None:
     raise ValueError("Nested key path cannot be empty")
 
 
-def _mapping_from_flat_items(
+def mapping_from_flat_items(
     items: Mapping[str, Any],
     *,
     prefix: str = "",
     nested_delimiter: str = "__",
     case_sensitive: bool = False,
+    preserve_keys: bool = False,
     parse_values: bool = True,
 ) -> dict[str, Any]:
+    """
+    Convert flat key/value pairs into a nested configuration mapping.
+
+    By default, key segments are lowercased and hyphens are replaced with
+    underscores. Set ``preserve_keys=True`` to keep every segment unchanged;
+    in that mode, ``case_sensitive`` has no effect.
+    """
     output: dict[str, Any] = {}
 
     for raw_key, raw_value in items.items():
@@ -131,7 +147,11 @@ def _mapping_from_flat_items(
         parts = key.split(nested_delimiter) if nested_delimiter else [key]
 
         normalized_parts = [
-            _normalize_key(part, case_sensitive=case_sensitive)
+            _normalize_key(
+                part,
+                case_sensitive=case_sensitive,
+                preserve_keys=preserve_keys,
+            )
             for part in parts
             if part
         ]
@@ -214,14 +234,16 @@ class EnvironmentVariablesSource:
     case_sensitive: bool = False
     parse_values: bool = True
     environ: Mapping[str, str] | None = None
+    preserve_keys: bool = False
 
     def load(self) -> Mapping[str, Any]:
         env = self.environ or os.environ
-        return _mapping_from_flat_items(
+        return mapping_from_flat_items(
             env,
             prefix=self.prefix,
             nested_delimiter=self.nested_delimiter,
             case_sensitive=self.case_sensitive,
+            preserve_keys=self.preserve_keys,
             parse_values=self.parse_values,
         )
 
@@ -235,6 +257,7 @@ class DotEnvFileSource:
     case_sensitive: bool = False
     parse_values: bool = True
     reload_on_change: bool = False
+    preserve_keys: bool = False
 
     def load(self) -> Mapping[str, Any]:
         source_path = Path(self.path)
@@ -244,10 +267,11 @@ class DotEnvFileSource:
             raise FileNotFoundError(f".env file not found: {source_path}")
 
         values = dotenv_values(source_path)
-        return _mapping_from_flat_items(
+        return mapping_from_flat_items(
             values,
             prefix=self.prefix,
             nested_delimiter=self.nested_delimiter,
             case_sensitive=self.case_sensitive,
+            preserve_keys=self.preserve_keys,
             parse_values=self.parse_values,
         )

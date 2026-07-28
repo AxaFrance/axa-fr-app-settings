@@ -1,6 +1,6 @@
 import contextlib
 
-from .base import SettingsModel
+from .base import SettingsModel, StrictSettingsModel
 from .builder import ConfigurationBuilder, SettingsBuilder
 from .configuration import ConfigurationRoot, ConfigurationSection
 from .sources import (
@@ -11,6 +11,7 @@ from .sources import (
     JsonFileSource,
     SettingsSource,
     YamlFileSource,
+    mapping_from_flat_items,
 )
 
 with contextlib.suppress(ImportError):
@@ -29,5 +30,7 @@ __all__ = [
     "SettingsModel",
     "SettingsSource",
     "SettingsWatcher",
+    "StrictSettingsModel",
     "YamlFileSource",
+    "mapping_from_flat_items",
 ]

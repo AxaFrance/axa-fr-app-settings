@@ -14,3 +14,13 @@ class SettingsModel(BaseModel):
         str_strip_whitespace=True,
         validate_assignment=True,
     )
+
+
+class StrictSettingsModel(SettingsModel):
+    """
+    Base stricte pour les modèles de configuration.
+
+    Les clés inconnues provoquent une erreur de validation.
+    """
+
+    model_config = ConfigDict(extra="forbid")

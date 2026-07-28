@@ -77,6 +77,7 @@ class SettingsBuilder(Generic[TSettings]):
         prefix: str = "",
         nested_delimiter: str = "__",
         case_sensitive: bool = False,
+        preserve_keys: bool = False,
         parse_values: bool = True,
         reload_on_change: bool = False,
     ) -> SettingsBuilder[TSettings]:
@@ -87,6 +88,7 @@ class SettingsBuilder(Generic[TSettings]):
                 prefix=prefix,
                 nested_delimiter=nested_delimiter,
                 case_sensitive=case_sensitive,
+                preserve_keys=preserve_keys,
                 parse_values=parse_values,
                 reload_on_change=reload_on_change,
             )
@@ -99,6 +101,7 @@ class SettingsBuilder(Generic[TSettings]):
         prefix: str = "",
         nested_delimiter: str = "__",
         case_sensitive: bool = False,
+        preserve_keys: bool = False,
         parse_values: bool = True,
         environ: Mapping[str, str] | None = None,
     ) -> SettingsBuilder[TSettings]:
@@ -107,6 +110,7 @@ class SettingsBuilder(Generic[TSettings]):
                 prefix=prefix,
                 nested_delimiter=nested_delimiter,
                 case_sensitive=case_sensitive,
+                preserve_keys=preserve_keys,
                 parse_values=parse_values,
                 environ=environ,
             )
