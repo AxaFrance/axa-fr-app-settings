@@ -13,7 +13,9 @@ from dotenv import dotenv_values
 from pydantic import BaseModel
 
 FlatKeyNormalization = Literal["legacy", "preserve", "model"]
+DynamicKeyCase = Literal["preserve", "lower"]
 _FLAT_KEY_NORMALIZATIONS = frozenset({"legacy", "preserve", "model"})
+_DYNAMIC_KEY_CASES = frozenset({"preserve", "lower"})
 
 
 class SettingsSource(Protocol):
@@ -24,6 +26,10 @@ class SettingsSource(Protocol):
 def _normalize_legacy_key(key: str, *, case_sensitive: bool) -> str:
     normalized = key.replace("-", "_")
     return normalized if case_sensitive else normalized.lower()
+
+
+def _normalize_dynamic_key(key: str, *, dynamic_key_case: DynamicKeyCase) -> str:
+    return key.lower() if dynamic_key_case == "lower" else key
 
 
 def _unwrap_annotation(annotation: Any) -> Any:
@@ -118,6 +124,7 @@ def _normalize_model_path(
     *,
     settings_type: type[BaseModel],
     ignore_unknown_root: bool,
+    dynamic_key_case: DynamicKeyCase,
 ) -> list[str] | None:
     normalized_parts: list[str] = []
     annotation: Any = settings_type
@@ -142,7 +149,9 @@ def _normalize_model_path(
 
         mapping_value_type = _mapping_value_type(annotation)
         if mapping_value_type is not None:
-            normalized_parts.append(part)
+            normalized_parts.append(
+                _normalize_dynamic_key(part, dynamic_key_case=dynamic_key_case)
+            )
             annotation = mapping_value_type
             continue
 
@@ -251,6 +260,7 @@ def mapping_from_flat_items(
     nested_delimiter: str = "__",
     case_sensitive: bool = False,
     key_normalization: FlatKeyNormalization = "legacy",
+    dynamic_key_case: DynamicKeyCase = "preserve",
     settings_type: type[BaseModel] | None = None,
     ignore_unknown: bool = False,
     parse_values: bool = True,
@@ -260,12 +270,16 @@ def mapping_from_flat_items(
 
     ``legacy`` keeps the historical lowercase/hyphen normalization,
     ``preserve`` keeps all segments unchanged, and ``model`` normalizes
-    Pydantic fields while preserving dynamic mapping keys.
+    Pydantic fields while applying ``dynamic_key_case`` to mapping keys.
     """
     if key_normalization not in _FLAT_KEY_NORMALIZATIONS:
         raise ValueError(f"Unsupported key normalization: {key_normalization}")
+    if dynamic_key_case not in _DYNAMIC_KEY_CASES:
+        raise ValueError(f"Unsupported dynamic key case: {dynamic_key_case}")
     if key_normalization == "model" and settings_type is None:
         raise ValueError("settings_type is required for model key normalization")
+    if dynamic_key_case != "preserve" and key_normalization != "model":
+        raise ValueError("dynamic_key_case requires model key normalization")
     if ignore_unknown and key_normalization != "model":
         raise ValueError("ignore_unknown requires model key normalization")
 
@@ -290,6 +304,7 @@ def mapping_from_flat_items(
                 non_empty_parts,
                 settings_type=settings_type,
                 ignore_unknown_root=ignore_unknown,
+                dynamic_key_case=dynamic_key_case,
             )
             if normalized_parts is None:
                 continue
@@ -382,6 +397,7 @@ class EnvironmentVariablesSource:
     key_normalization: FlatKeyNormalization = "legacy"
     settings_type: type[BaseModel] | None = None
     ignore_unknown_environment_variables: bool = False
+    dynamic_key_case: DynamicKeyCase = "preserve"
 
     def load(self) -> Mapping[str, Any]:
         env = self.environ if self.environ is not None else os.environ
@@ -391,6 +407,7 @@ class EnvironmentVariablesSource:
             nested_delimiter=self.nested_delimiter,
             case_sensitive=self.case_sensitive,
             key_normalization=self.key_normalization,
+            dynamic_key_case=self.dynamic_key_case,
             settings_type=self.settings_type,
             ignore_unknown=self.ignore_unknown_environment_variables,
             parse_values=self.parse_values,
@@ -408,6 +425,7 @@ class DotEnvFileSource:
     reload_on_change: bool = False
     key_normalization: FlatKeyNormalization = "legacy"
     settings_type: type[BaseModel] | None = None
+    dynamic_key_case: DynamicKeyCase = "preserve"
 
     def load(self) -> Mapping[str, Any]:
         source_path = Path(self.path)
@@ -423,6 +441,7 @@ class DotEnvFileSource:
             nested_delimiter=self.nested_delimiter,
             case_sensitive=self.case_sensitive,
             key_normalization=self.key_normalization,
+            dynamic_key_case=self.dynamic_key_case,
             settings_type=self.settings_type,
             parse_values=self.parse_values,
         )

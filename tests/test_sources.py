@@ -110,6 +110,37 @@ def test_model_normalization_preserves_dynamic_keys_and_normalizes_fields() -> N
     assert settings.llm_oidc["gpt-4o"].client_id == "smartguide-client"
 
 
+def test_model_normalization_can_lower_dynamic_keys_for_source_merging() -> None:
+    settings = (
+        ConfigurationBuilder(SmartGuideSettings)
+        .add_in_memory_collection(
+            {
+                "llm_oidc": {
+                    "smartguide": {
+                        "client_id": "file-client",
+                    },
+                    "gpt-4o": {
+                        "client_id": "file-gpt-client",
+                    },
+                }
+            }
+        )
+        .add_environment_variables(
+            environ={
+                "LLM_OIDC__SMARTGUIDE__CLIENT_ID": "environment-client",
+                "LLM_OIDC__gpt-4o__CLIENT_ID": "environment-gpt-client",
+            },
+            key_normalization="model",
+            dynamic_key_case="lower",
+        )
+        .build()
+    )
+
+    assert list(settings.llm_oidc) == ["smartguide", "gpt-4o"]
+    assert settings.llm_oidc["smartguide"].client_id == "environment-client"
+    assert settings.llm_oidc["gpt-4o"].client_id == "environment-gpt-client"
+
+
 def test_model_normalization_is_available_for_env_files(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -124,6 +155,37 @@ def test_model_normalization_is_available_for_env_files(tmp_path: Path) -> None:
     )
 
     assert settings.llm_oidc["gpt-4o"].client_id == "smartguide-client"
+
+
+def test_env_file_can_lower_dynamic_keys_for_source_merging(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "LLM_OIDC__SMARTGUIDE__CLIENT_ID=environment-client\n"
+        "LLM_OIDC__gpt-4o__CLIENT_ID=environment-gpt-client\n",
+        encoding="utf-8",
+    )
+
+    settings = (
+        ConfigurationBuilder(SmartGuideSettings)
+        .add_in_memory_collection(
+            {
+                "llm_oidc": {
+                    "smartguide": {"client_id": "file-client"},
+                    "gpt-4o": {"client_id": "file-gpt-client"},
+                }
+            }
+        )
+        .add_env_file(
+            env_file.as_posix(),
+            key_normalization="model",
+            dynamic_key_case="lower",
+        )
+        .build()
+    )
+
+    assert list(settings.llm_oidc) == ["smartguide", "gpt-4o"]
+    assert settings.llm_oidc["smartguide"].client_id == "environment-client"
+    assert settings.llm_oidc["gpt-4o"].client_id == "environment-gpt-client"
 
 
 def test_model_normalization_traverses_list_items() -> None:
@@ -203,4 +265,14 @@ def test_unknown_filter_requires_model_normalization() -> None:
     )
 
     with pytest.raises(ValueError, match="ignore_unknown requires model"):
+        builder.build_data()
+
+
+def test_dynamic_key_case_requires_model_normalization() -> None:
+    builder = ConfigurationBuilder(SmartGuideSettings).add_environment_variables(
+        environ={"LLM_OIDC__SMARTGUIDE__CLIENT_ID": "smartguide-client"},
+        dynamic_key_case="lower",
+    )
+
+    with pytest.raises(ValueError, match="dynamic_key_case requires model"):
         builder.build_data()

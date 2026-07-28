@@ -229,6 +229,26 @@ data = (
 root segment does not match a settings field. Unknown segments below a known
 root are kept so that strict models can still report configuration mistakes.
 
+By default, model normalization preserves dynamic dictionary keys. Set
+`dynamic_key_case="lower"` when environment keys must merge case-insensitively
+with lowercase keys coming from files:
+
+```python
+settings = (
+    ConfigurationBuilder(AppSettings)
+    .add_json_file("settings.json", optional=True)
+    .add_environment_variables(
+        key_normalization="model",
+        dynamic_key_case="lower",
+        ignore_unknown_environment_variables=True,
+    )
+    .build()
+)
+```
+
+`LLM_OIDC__SMARTGUIDE__CLIENT_ID` then targets `llm_oidc["smartguide"]`,
+while `LLM_OIDC__gpt-4o__CLIENT_ID` still targets `llm_oidc["gpt-4o"]`.
+
 `case_sensitive` only applies to the `legacy` strategy. The `__` delimiter
 remains structural. Model and preserve normalization are also supported by
 `.add_env_file()`.
@@ -400,11 +420,11 @@ Here:
 |---|---|
 | `add_yaml_file(path, *, optional=False, encoding="utf-8", reload_on_change=False)` | Add a YAML file source |
 | `add_json_file(path, *, optional=False, encoding="utf-8", reload_on_change=False)` | Add a JSON file source |
-| `add_env_file(path=".env", *, optional=False, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", parse_values=True, reload_on_change=False)` | Add a `.env` file source |
-| `add_environment_variables(*, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", ignore_unknown_environment_variables=False, parse_values=True)` | Add environment variables |
+| `add_env_file(path=".env", *, optional=False, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", dynamic_key_case="preserve", parse_values=True, reload_on_change=False)` | Add a `.env` file source |
+| `add_environment_variables(*, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", dynamic_key_case="preserve", ignore_unknown_environment_variables=False, parse_values=True)` | Add environment variables |
 | `add_in_memory_collection(data)` | Add an in-memory dict |
 | `add_source(source)` | Add a custom source (any object with a `load()` method) |
-| `mapping_from_flat_items(items, *, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", settings_type=None, ignore_unknown=False, parse_values=True)` | Convert flat items into a nested mapping |
+| `mapping_from_flat_items(items, *, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", dynamic_key_case="preserve", settings_type=None, ignore_unknown=False, parse_values=True)` | Convert flat items into a nested mapping |
 | `build()` | Build and return the validated settings model |
 | `build_data()` | Build and return the raw merged dict |
 | `build_configuration()` | Build and return a navigable configuration root |
@@ -417,6 +437,7 @@ Here:
 | `optional` | `False` | When `True`, the source is silently skipped if the file does not exist. When `False` (default), a `FileNotFoundError` is raised. |
 | `case_sensitive` | `False` | In `legacy` mode, preserve case while still replacing hyphens with underscores. |
 | `key_normalization` | `"legacy"` | Use `"legacy"` for 0.4.1 behavior, `"preserve"` for literal segments, or `"model"` for case-insensitive Pydantic fields and exact dictionary keys. |
+| `dynamic_key_case` | `"preserve"` | In model mode, use `"lower"` to lowercase dynamic dictionary keys before merging sources. |
 | `ignore_unknown_environment_variables` | `False` | In model mode, ignore variables whose root segment is not a declared settings field. |
 | `reload_on_change` | `False` | When `True`, the file is watched for changes and the configuration is automatically rebuilt when modified (requires `watchdog`, see below). When `False` (default), the file is read once at build time. |
 | `polling_interval_seconds` | `None` | When set to a number of seconds, `build_watched()` will **periodically rebuild** the whole configuration at that interval. Useful for non-file sources (Key Vault, databases…) that cannot be watched with `watchdog`. `None` (default) disables polling. |
