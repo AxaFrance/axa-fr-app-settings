@@ -13,6 +13,7 @@ from .sources import (
     DictSource,
     DotEnvFileSource,
     EnvironmentVariablesSource,
+    FlatKeyNormalization,
     JsonFileSource,
     SettingsSource,
     YamlFileSource,
@@ -77,7 +78,7 @@ class SettingsBuilder(Generic[TSettings]):
         prefix: str = "",
         nested_delimiter: str = "__",
         case_sensitive: bool = False,
-        preserve_keys: bool = False,
+        key_normalization: FlatKeyNormalization = "legacy",
         parse_values: bool = True,
         reload_on_change: bool = False,
     ) -> SettingsBuilder[TSettings]:
@@ -88,7 +89,8 @@ class SettingsBuilder(Generic[TSettings]):
                 prefix=prefix,
                 nested_delimiter=nested_delimiter,
                 case_sensitive=case_sensitive,
-                preserve_keys=preserve_keys,
+                key_normalization=key_normalization,
+                settings_type=self._settings_type,
                 parse_values=parse_values,
                 reload_on_change=reload_on_change,
             )
@@ -101,7 +103,8 @@ class SettingsBuilder(Generic[TSettings]):
         prefix: str = "",
         nested_delimiter: str = "__",
         case_sensitive: bool = False,
-        preserve_keys: bool = False,
+        key_normalization: FlatKeyNormalization = "legacy",
+        ignore_unknown_environment_variables: bool = False,
         parse_values: bool = True,
         environ: Mapping[str, str] | None = None,
     ) -> SettingsBuilder[TSettings]:
@@ -110,7 +113,9 @@ class SettingsBuilder(Generic[TSettings]):
                 prefix=prefix,
                 nested_delimiter=nested_delimiter,
                 case_sensitive=case_sensitive,
-                preserve_keys=preserve_keys,
+                key_normalization=key_normalization,
+                settings_type=self._settings_type,
+                ignore_unknown_environment_variables=ignore_unknown_environment_variables,
                 parse_values=parse_values,
                 environ=environ,
             )

@@ -43,7 +43,7 @@ settings = (
 - Typed validation with Pydantic v2
 - Optional strict validation for unknown keys
 - Compatible with `dict[str, SubModel]`, lists, booleans, integers, etc.
-- Optional preservation of literal key segments in flat sources
+- Legacy, literal, or model-aware key normalization for flat sources
 - Direct path access with `config["section:key"]`
 - Typed subsections with `.get_section("...").get(MyModel)`
 
@@ -175,20 +175,20 @@ export REGIONS__1__ENDPOINTS__0__NAME="catalog"
 export REGIONS__1__ENDPOINTS__0__URL="https://us-east/catalog"
 ```
 
-#### Preserve literal key segments
+#### Flat-key normalization
 
 Flat sources normalize key segments by default: they lowercase them and replace
 hyphens with underscores. This keeps the existing behavior, so
 `youhou__uuu-Toto__youhou` becomes `youhou.uuu_toto.youhou`.
 
-Set `preserve_keys=True` to keep every segment exactly as written:
+Use `key_normalization="preserve"` to keep every segment exactly as written:
 
 ```python
 data = (
     ConfigurationBuilder(AppSettings)
     .add_environment_variables(
         environ={"youhou__uuu-Toto__youhou": "secret"},
-        preserve_keys=True,
+        key_normalization="preserve",
     )
     .build_data()
 )
@@ -200,10 +200,38 @@ The resulting mapping preserves `uuu-Toto`:
 {"youhou": {"uuu-Toto": {"youhou": "secret"}}}
 ```
 
-`preserve_keys=True` takes precedence over `case_sensitive`: no case conversion
-or hyphen replacement is performed. The `__` delimiter remains structural.
-The same option is available on `.add_env_file()`,
-`EnvironmentVariablesSource`, and `DotEnvFileSource`.
+Use `key_normalization="model"` when static Pydantic field names must be matched
+case-insensitively while dynamic dictionary keys must be preserved. For example,
+`LLM_OIDC__gpt-4o__CLIENT_ID` is converted to:
+
+```python
+{"llm_oidc": {"gpt-4o": {"client_id": "secret"}}}
+```
+
+The builder uses its settings model to distinguish fields from dictionary keys:
+
+```python
+data = (
+    ConfigurationBuilder(AppSettings)
+    .add_environment_variables(
+        environ={
+            "LLM_OIDC__gpt-4o__CLIENT_ID": "secret",
+            "PATH": "/usr/bin",
+        },
+        key_normalization="model",
+        ignore_unknown_environment_variables=True,
+    )
+    .build_data()
+)
+```
+
+`ignore_unknown_environment_variables=True` filters environment variables whose
+root segment does not match a settings field. Unknown segments below a known
+root are kept so that strict models can still report configuration mistakes.
+
+`case_sensitive` only applies to the `legacy` strategy. The `__` delimiter
+remains structural. Model and preserve normalization are also supported by
+`.add_env_file()`.
 
 Custom providers can reuse the public conversion function:
 
@@ -211,10 +239,15 @@ Custom providers can reuse the public conversion function:
 from axa_fr_app_settings import mapping_from_flat_items
 
 nested = mapping_from_flat_items(
-    {"youhou__uuu-Toto__youhou": "secret"},
-    preserve_keys=True,
+    {"LLM_OIDC__gpt-4o__CLIENT_ID": "secret"},
+    key_normalization="model",
+    settings_type=AppSettings,
 )
 ```
+
+> **0.4.2 migration:** `preserve_keys=True` has been replaced by
+> `key_normalization="preserve"` in 0.4.3. Calls supported by 0.4.1 keep their
+> historical behavior.
 
 ### 4. YAML example
 
@@ -367,11 +400,11 @@ Here:
 |---|---|
 | `add_yaml_file(path, *, optional=False, encoding="utf-8", reload_on_change=False)` | Add a YAML file source |
 | `add_json_file(path, *, optional=False, encoding="utf-8", reload_on_change=False)` | Add a JSON file source |
-| `add_env_file(path=".env", *, optional=False, prefix="", nested_delimiter="__", case_sensitive=False, preserve_keys=False, parse_values=True, reload_on_change=False)` | Add a `.env` file source |
-| `add_environment_variables(*, prefix="", nested_delimiter="__", case_sensitive=False, preserve_keys=False, parse_values=True)` | Add environment variables |
+| `add_env_file(path=".env", *, optional=False, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", parse_values=True, reload_on_change=False)` | Add a `.env` file source |
+| `add_environment_variables(*, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", ignore_unknown_environment_variables=False, parse_values=True)` | Add environment variables |
 | `add_in_memory_collection(data)` | Add an in-memory dict |
 | `add_source(source)` | Add a custom source (any object with a `load()` method) |
-| `mapping_from_flat_items(items, *, prefix="", nested_delimiter="__", case_sensitive=False, preserve_keys=False, parse_values=True)` | Convert flat items into a nested mapping |
+| `mapping_from_flat_items(items, *, prefix="", nested_delimiter="__", case_sensitive=False, key_normalization="legacy", settings_type=None, ignore_unknown=False, parse_values=True)` | Convert flat items into a nested mapping |
 | `build()` | Build and return the validated settings model |
 | `build_data()` | Build and return the raw merged dict |
 | `build_configuration()` | Build and return a navigable configuration root |
@@ -382,8 +415,9 @@ Here:
 | Parameter | Default | Description |
 |---|---|---|
 | `optional` | `False` | When `True`, the source is silently skipped if the file does not exist. When `False` (default), a `FileNotFoundError` is raised. |
-| `case_sensitive` | `False` | When `True`, preserve case while still replacing hyphens with underscores. Ignored when `preserve_keys=True`. |
-| `preserve_keys` | `False` | When `True`, preserve every flat-key segment exactly, including case and hyphens. |
+| `case_sensitive` | `False` | In `legacy` mode, preserve case while still replacing hyphens with underscores. |
+| `key_normalization` | `"legacy"` | Use `"legacy"` for 0.4.1 behavior, `"preserve"` for literal segments, or `"model"` for case-insensitive Pydantic fields and exact dictionary keys. |
+| `ignore_unknown_environment_variables` | `False` | In model mode, ignore variables whose root segment is not a declared settings field. |
 | `reload_on_change` | `False` | When `True`, the file is watched for changes and the configuration is automatically rebuilt when modified (requires `watchdog`, see below). When `False` (default), the file is read once at build time. |
 | `polling_interval_seconds` | `None` | When set to a number of seconds, `build_watched()` will **periodically rebuild** the whole configuration at that interval. Useful for non-file sources (Key Vault, databases…) that cannot be watched with `watchdog`. `None` (default) disables polling. |
 

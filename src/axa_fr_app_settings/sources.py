@@ -5,10 +5,15 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from types import UnionType
+from typing import Annotated, Any, Literal, Protocol, Union, get_args, get_origin
 
 import yaml
 from dotenv import dotenv_values
+from pydantic import BaseModel
+
+FlatKeyNormalization = Literal["legacy", "preserve", "model"]
+_FLAT_KEY_NORMALIZATIONS = frozenset({"legacy", "preserve", "model"})
 
 
 class SettingsSource(Protocol):
@@ -16,17 +21,141 @@ class SettingsSource(Protocol):
         ...
 
 
-def _normalize_key(
-    key: str,
-    *,
-    case_sensitive: bool,
-    preserve_keys: bool,
-) -> str:
-    if preserve_keys:
-        return key
-
+def _normalize_legacy_key(key: str, *, case_sensitive: bool) -> str:
     normalized = key.replace("-", "_")
     return normalized if case_sensitive else normalized.lower()
+
+
+def _unwrap_annotation(annotation: Any) -> Any:
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
+
+    if get_origin(annotation) in (Union, UnionType):
+        union_types = [item for item in get_args(annotation) if item is not type(None)]
+        if len(union_types) == 1:
+            return _unwrap_annotation(union_types[0])
+
+    return annotation
+
+
+def _is_type(annotation: Any, expected_type: type[Any]) -> bool:
+    try:
+        return isinstance(annotation, type) and issubclass(annotation, expected_type)
+    except TypeError:
+        return False
+
+
+def _mapping_value_type(annotation: Any) -> Any | None:
+    annotation = _unwrap_annotation(annotation)
+    origin = get_origin(annotation)
+
+    if annotation in (dict, Mapping):
+        return Any
+    if origin is None or not _is_type(origin, Mapping):
+        return None
+
+    arguments = get_args(annotation)
+    return arguments[1] if len(arguments) >= 2 else Any
+
+
+def _sequence_item_type(annotation: Any) -> Any | None:
+    annotation = _unwrap_annotation(annotation)
+    origin = get_origin(annotation)
+
+    if annotation is list:
+        return Any
+    if origin is not list:
+        return None
+
+    arguments = get_args(annotation)
+    return arguments[0] if arguments else Any
+
+
+def _field_input_names(field_name: str, field: Any) -> list[str]:
+    names = [field_name]
+    if isinstance(field.validation_alias, str):
+        names.append(field.validation_alias)
+    if isinstance(field.alias, str):
+        names.append(field.alias)
+    return list(dict.fromkeys(names))
+
+
+def _match_model_field(
+    model_type: type[BaseModel],
+    key: str,
+) -> tuple[str, Any] | None:
+    exact_matches: list[tuple[str, str, Any]] = []
+    casefold_matches: list[tuple[str, str, Any]] = []
+
+    for field_name, field in model_type.model_fields.items():
+        input_names = _field_input_names(field_name, field)
+        exact_name = next((input_name for input_name in input_names if input_name == key), None)
+        if exact_name is not None:
+            exact_matches.append((field_name, exact_name, field.annotation))
+            continue
+
+        casefold_name = next(
+            (input_name for input_name in input_names if input_name.casefold() == key.casefold()),
+            None,
+        )
+        if casefold_name is not None:
+            casefold_matches.append((field_name, casefold_name, field.annotation))
+
+    matches = exact_matches or casefold_matches
+    if not matches:
+        return None
+
+    if len(matches) > 1:
+        raise ValueError(
+            f"Configuration key '{key}' is ambiguous for model {model_type.__name__}"
+        )
+    _, input_name, annotation = matches[0]
+    return input_name, annotation
+
+
+def _normalize_model_path(
+    parts: list[str],
+    *,
+    settings_type: type[BaseModel],
+    ignore_unknown_root: bool,
+) -> list[str] | None:
+    normalized_parts: list[str] = []
+    annotation: Any = settings_type
+
+    for index, part in enumerate(parts):
+        annotation = _unwrap_annotation(annotation)
+
+        if _is_type(annotation, BaseModel):
+            field_match = _match_model_field(annotation, part)
+            if field_match is None:
+                if index == 0 and ignore_unknown_root:
+                    return None
+                normalized_parts.extend(
+                    _normalize_legacy_key(remaining_part, case_sensitive=False)
+                    for remaining_part in parts[index:]
+                )
+                break
+
+            field_name, annotation = field_match
+            normalized_parts.append(field_name)
+            continue
+
+        mapping_value_type = _mapping_value_type(annotation)
+        if mapping_value_type is not None:
+            normalized_parts.append(part)
+            annotation = mapping_value_type
+            continue
+
+        sequence_item_type = _sequence_item_type(annotation)
+        if sequence_item_type is not None:
+            normalized_parts.append(part)
+            annotation = sequence_item_type
+            continue
+
+        normalized_parts.extend(parts[index:])
+        break
+
+    return normalized_parts
 
 
 def _parse_scalar(value: Any) -> Any:
@@ -121,16 +250,25 @@ def mapping_from_flat_items(
     prefix: str = "",
     nested_delimiter: str = "__",
     case_sensitive: bool = False,
-    preserve_keys: bool = False,
+    key_normalization: FlatKeyNormalization = "legacy",
+    settings_type: type[BaseModel] | None = None,
+    ignore_unknown: bool = False,
     parse_values: bool = True,
 ) -> dict[str, Any]:
     """
     Convert flat key/value pairs into a nested configuration mapping.
 
-    By default, key segments are lowercased and hyphens are replaced with
-    underscores. Set ``preserve_keys=True`` to keep every segment unchanged;
-    in that mode, ``case_sensitive`` has no effect.
+    ``legacy`` keeps the historical lowercase/hyphen normalization,
+    ``preserve`` keeps all segments unchanged, and ``model`` normalizes
+    Pydantic fields while preserving dynamic mapping keys.
     """
+    if key_normalization not in _FLAT_KEY_NORMALIZATIONS:
+        raise ValueError(f"Unsupported key normalization: {key_normalization}")
+    if key_normalization == "model" and settings_type is None:
+        raise ValueError("settings_type is required for model key normalization")
+    if ignore_unknown and key_normalization != "model":
+        raise ValueError("ignore_unknown requires model key normalization")
+
     output: dict[str, Any] = {}
 
     for raw_key, raw_value in items.items():
@@ -145,16 +283,23 @@ def mapping_from_flat_items(
             continue
 
         parts = key.split(nested_delimiter) if nested_delimiter else [key]
+        non_empty_parts = [part for part in parts if part]
 
-        normalized_parts = [
-            _normalize_key(
-                part,
-                case_sensitive=case_sensitive,
-                preserve_keys=preserve_keys,
+        if key_normalization == "model":
+            normalized_parts = _normalize_model_path(
+                non_empty_parts,
+                settings_type=settings_type,
+                ignore_unknown_root=ignore_unknown,
             )
-            for part in parts
-            if part
-        ]
+            if normalized_parts is None:
+                continue
+        elif key_normalization == "preserve":
+            normalized_parts = non_empty_parts
+        else:
+            normalized_parts = [
+                _normalize_legacy_key(part, case_sensitive=case_sensitive)
+                for part in non_empty_parts
+            ]
 
         if not normalized_parts:
             continue
@@ -234,16 +379,20 @@ class EnvironmentVariablesSource:
     case_sensitive: bool = False
     parse_values: bool = True
     environ: Mapping[str, str] | None = None
-    preserve_keys: bool = False
+    key_normalization: FlatKeyNormalization = "legacy"
+    settings_type: type[BaseModel] | None = None
+    ignore_unknown_environment_variables: bool = False
 
     def load(self) -> Mapping[str, Any]:
-        env = self.environ or os.environ
+        env = self.environ if self.environ is not None else os.environ
         return mapping_from_flat_items(
             env,
             prefix=self.prefix,
             nested_delimiter=self.nested_delimiter,
             case_sensitive=self.case_sensitive,
-            preserve_keys=self.preserve_keys,
+            key_normalization=self.key_normalization,
+            settings_type=self.settings_type,
+            ignore_unknown=self.ignore_unknown_environment_variables,
             parse_values=self.parse_values,
         )
 
@@ -257,7 +406,8 @@ class DotEnvFileSource:
     case_sensitive: bool = False
     parse_values: bool = True
     reload_on_change: bool = False
-    preserve_keys: bool = False
+    key_normalization: FlatKeyNormalization = "legacy"
+    settings_type: type[BaseModel] | None = None
 
     def load(self) -> Mapping[str, Any]:
         source_path = Path(self.path)
@@ -272,6 +422,7 @@ class DotEnvFileSource:
             prefix=self.prefix,
             nested_delimiter=self.nested_delimiter,
             case_sensitive=self.case_sensitive,
-            preserve_keys=self.preserve_keys,
+            key_normalization=self.key_normalization,
+            settings_type=self.settings_type,
             parse_values=self.parse_values,
         )
